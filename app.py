@@ -4,11 +4,12 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 from scipy import stats
 
-# Global variable to store the dataframe
+# Global variables to store the dataframe and history
 current_df = None
+df_history = []
 
 def load_file(file):
-    global current_df
+    global current_df, df_history
     if file is None:
         return "No file uploaded", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
     filename = file.name.lower()
@@ -23,6 +24,7 @@ def load_file(file):
             return "Unsupported file format", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
         
         current_df = df.copy()
+        df_history = [df.copy()]  # Initialize history with original data
         info = f"Rows: {df.shape[0]} | Columns: {df.shape[1]}"
         
         # Get column lists for different purposes
@@ -40,6 +42,23 @@ def load_file(file):
                 gr.update(choices=all_cols))
     except Exception as e:
         return f"Error: {str(e)}", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
+
+def save_to_history():
+    global current_df, df_history
+    if current_df is not None:
+        df_history.append(current_df.copy())
+        # Keep only last 10 states to avoid memory issues
+        if len(df_history) > 10:
+            df_history.pop(0)
+
+def undo_last_action():
+    global current_df, df_history
+    if len(df_history) > 1:
+        df_history.pop()  # Remove current state
+        current_df = df_history[-1].copy()  # Restore previous state
+        return f"✓ Undo successful. Restored to previous state (History: {len(df_history)} states)", current_df.head(20)
+    else:
+        return "Cannot undo. No previous state available.", current_df.head(20) if current_df is not None else None
 
 def get_cleaning_summary():
     global current_df
@@ -77,10 +96,11 @@ def handle_missing_values(strategy, columns, fill_value):
     if current_df is None:
         return "No dataset loaded", None
     
-    df = current_df.copy()
-    
     if not columns:
         return "Please select at least one column", None
+    
+    save_to_history()
+    df = current_df.copy()
     
     try:
         for col in columns:
@@ -109,6 +129,7 @@ def handle_missing_values(strategy, columns, fill_value):
         current_df = df
         return f"✓ Missing values handled using '{strategy}' for {len(columns)} column(s)", df.head(20)
     except Exception as e:
+        df_history.pop()  # Remove failed state from history
         return f"Error: {str(e)}", None
 
 def remove_duplicates(subset_cols):
@@ -116,27 +137,33 @@ def remove_duplicates(subset_cols):
     if current_df is None:
         return "No dataset loaded", None
     
+    save_to_history()
     df = current_df.copy()
     initial_count = len(df)
     
-    if subset_cols:
-        df = df.drop_duplicates(subset=subset_cols)
-    else:
-        df = df.drop_duplicates()
-    
-    removed = initial_count - len(df)
-    current_df = df
-    return f"✓ Removed {removed} duplicate rows", df.head(20)
+    try:
+        if subset_cols:
+            df = df.drop_duplicates(subset=subset_cols)
+        else:
+            df = df.drop_duplicates()
+        
+        removed = initial_count - len(df)
+        current_df = df
+        return f"✓ Removed {removed} duplicate rows", df.head(20)
+    except Exception as e:
+        df_history.pop()
+        return f"Error: {str(e)}", None
 
 def handle_outliers(method, columns, threshold):
     global current_df
     if current_df is None:
         return "No dataset loaded", None
     
-    df = current_df.copy()
-    
     if not columns:
         return "Please select at least one column", None
+    
+    save_to_history()
+    df = current_df.copy()
     
     try:
         removed_count = 0
@@ -170,6 +197,7 @@ def handle_outliers(method, columns, threshold):
             msg += f" ({removed_count} rows removed)"
         return msg, df.head(20)
     except Exception as e:
+        df_history.pop()
         return f"Error: {str(e)}", None
 
 def correct_data_types(column, new_type):
@@ -180,6 +208,7 @@ def correct_data_types(column, new_type):
     if not column:
         return "Please select a column", None
     
+    save_to_history()
     df = current_df.copy()
     
     try:
@@ -199,6 +228,7 @@ def correct_data_types(column, new_type):
         current_df = df
         return f"✓ Column '{column}' converted to {new_type}", df.head(20)
     except Exception as e:
+        df_history.pop()
         return f"Error: {str(e)}", None
 
 def standardize_text(columns, operation):
@@ -209,6 +239,7 @@ def standardize_text(columns, operation):
     if not columns:
         return "Please select at least one column", None
     
+    save_to_history()
     df = current_df.copy()
     
     try:
@@ -227,6 +258,7 @@ def standardize_text(columns, operation):
         current_df = df
         return f"✓ Text standardized: {operation} for {len(columns)} column(s)", df.head(20)
     except Exception as e:
+        df_history.pop()
         return f"Error: {str(e)}", None
 
 def scale_normalize(columns, method):
@@ -237,6 +269,7 @@ def scale_normalize(columns, method):
     if not columns:
         return "Please select at least one column", None
     
+    save_to_history()
     df = current_df.copy()
     
     try:
@@ -253,6 +286,7 @@ def scale_normalize(columns, method):
         current_df = df
         return f"✓ Scaling applied: {method} for {len(columns)} column(s)", df.head(20)
     except Exception as e:
+        df_history.pop()
         return f"Error: {str(e)}", None
 
 def download_cleaned_data():
@@ -265,8 +299,9 @@ def download_cleaned_data():
     return output_path
 
 def reset_data():
-    global current_df
+    global current_df, df_history
     current_df = None
+    df_history = []
     return "Dataset reset. Please upload a new file.", None
 
 with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as app:
@@ -287,12 +322,27 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
     
     with gr.Tab("🧹 Data Cleaning"):
         gr.Markdown("### Data Quality Summary")
-        summary_btn = gr.Button("Generate Summary", variant="primary")
+        with gr.Row():
+            summary_btn = gr.Button("Generate Summary", variant="primary")
+            undo_btn = gr.Button("↩️ Undo Last Action", variant="secondary", size="sm")
+        
         summary_output = gr.Markdown()
+        
+        with gr.Row():
+            undo_status = gr.Textbox(label="Undo Status", visible=False)
+            undo_preview = gr.Dataframe(label="Preview After Undo", visible=False)
         
         summary_btn.click(
             fn=get_cleaning_summary,
             outputs=summary_output
+        )
+        
+        undo_btn.click(
+            fn=undo_last_action,
+            outputs=[undo_status, undo_preview]
+        ).then(
+            lambda: (gr.update(visible=True), gr.update(visible=True)),
+            outputs=[undo_status, undo_preview]
         )
         
         gr.Markdown("---")
@@ -314,13 +364,21 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                 )
                 fill_val = gr.Textbox(label="Custom Fill Value (if applicable)", value="0")
             
-            missing_btn = gr.Button("Apply", variant="primary")
+            with gr.Row():
+                missing_btn = gr.Button("Apply", variant="primary")
+                missing_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
             missing_status = gr.Textbox(label="Status")
             missing_preview = gr.Dataframe(label="Preview")
             
             missing_btn.click(
                 fn=handle_missing_values,
                 inputs=[missing_strategy, missing_cols, fill_val],
+                outputs=[missing_status, missing_preview]
+            )
+            
+            missing_undo_btn.click(
+                fn=undo_last_action,
                 outputs=[missing_status, missing_preview]
             )
         
@@ -331,13 +389,22 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                 multiselect=True,
                 interactive=True
             )
-            dup_btn = gr.Button("Remove Duplicates", variant="primary")
+            
+            with gr.Row():
+                dup_btn = gr.Button("Remove Duplicates", variant="primary")
+                dup_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
             dup_status = gr.Textbox(label="Status")
             dup_preview = gr.Dataframe(label="Preview")
             
             dup_btn.click(
                 fn=remove_duplicates,
                 inputs=dup_cols,
+                outputs=[dup_status, dup_preview]
+            )
+            
+            dup_undo_btn.click(
+                fn=undo_last_action,
                 outputs=[dup_status, dup_preview]
             )
         
@@ -356,13 +423,21 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                 )
                 z_threshold = gr.Number(label="Z-Score Threshold", value=3)
             
-            outlier_btn = gr.Button("Apply", variant="primary")
+            with gr.Row():
+                outlier_btn = gr.Button("Apply", variant="primary")
+                outlier_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
             outlier_status = gr.Textbox(label="Status")
             outlier_preview = gr.Dataframe(label="Preview")
             
             outlier_btn.click(
                 fn=handle_outliers,
                 inputs=[outlier_method, outlier_cols, z_threshold],
+                outputs=[outlier_status, outlier_preview]
+            )
+            
+            outlier_undo_btn.click(
+                fn=undo_last_action,
                 outputs=[outlier_status, outlier_preview]
             )
         
@@ -379,13 +454,21 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                     value="int"
                 )
             
-            dtype_btn = gr.Button("Convert", variant="primary")
+            with gr.Row():
+                dtype_btn = gr.Button("Convert", variant="primary")
+                dtype_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
             dtype_status = gr.Textbox(label="Status")
             dtype_preview = gr.Dataframe(label="Preview")
             
             dtype_btn.click(
                 fn=correct_data_types,
                 inputs=[dtype_col, dtype_type],
+                outputs=[dtype_status, dtype_preview]
+            )
+            
+            dtype_undo_btn.click(
+                fn=undo_last_action,
                 outputs=[dtype_status, dtype_preview]
             )
         
@@ -404,13 +487,21 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                     value="Lowercase"
                 )
             
-            text_btn = gr.Button("Apply", variant="primary")
+            with gr.Row():
+                text_btn = gr.Button("Apply", variant="primary")
+                text_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
             text_status = gr.Textbox(label="Status")
             text_preview = gr.Dataframe(label="Preview")
             
             text_btn.click(
                 fn=standardize_text,
                 inputs=[text_cols, text_operation],
+                outputs=[text_status, text_preview]
+            )
+            
+            text_undo_btn.click(
+                fn=undo_last_action,
                 outputs=[text_status, text_preview]
             )
         
@@ -428,13 +519,21 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                     value="Standard Scaler (Z-score)"
                 )
             
-            scale_btn = gr.Button("Apply", variant="primary")
+            with gr.Row():
+                scale_btn = gr.Button("Apply", variant="primary")
+                scale_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
             scale_status = gr.Textbox(label="Status")
             scale_preview = gr.Dataframe(label="Preview")
             
             scale_btn.click(
                 fn=scale_normalize,
                 inputs=[scale_cols, scale_method],
+                outputs=[scale_status, scale_preview]
+            )
+            
+            scale_undo_btn.click(
+                fn=undo_last_action,
                 outputs=[scale_status, scale_preview]
             )
         
