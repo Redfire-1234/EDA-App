@@ -10,7 +10,7 @@ current_df = None
 def load_file(file):
     global current_df
     if file is None:
-        return "No file uploaded", None
+        return "No file uploaded", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
     filename = file.name.lower()
     try:
         if filename.endswith(".csv"):
@@ -20,13 +20,26 @@ def load_file(file):
         elif filename.endswith(".json"):
             df = pd.read_json(file.name)
         else:
-            return "Unsupported file format", None
+            return "Unsupported file format", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
         
         current_df = df.copy()
         info = f"Rows: {df.shape[0]} | Columns: {df.shape[1]}"
-        return info, df.head(20)
+        
+        # Get column lists for different purposes
+        all_cols = df.columns.tolist()
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        text_cols = df.select_dtypes(include=['object']).columns.tolist()
+        
+        return (info, df.head(20), 
+                gr.update(choices=all_cols), 
+                gr.update(choices=all_cols),
+                gr.update(choices=numeric_cols),
+                gr.update(choices=all_cols),
+                gr.update(choices=text_cols),
+                gr.update(choices=numeric_cols),
+                gr.update(choices=all_cols))
     except Exception as e:
-        return f"Error: {str(e)}", None
+        return f"Error: {str(e)}", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
 
 def get_cleaning_summary():
     global current_df
@@ -59,18 +72,15 @@ def get_cleaning_summary():
     
     return "\n".join(summary)
 
-def handle_missing_values(strategy, columns_str, fill_value):
+def handle_missing_values(strategy, columns, fill_value):
     global current_df
     if current_df is None:
         return "No dataset loaded", None
     
     df = current_df.copy()
     
-    if columns_str.strip():
-        columns = [c.strip() for c in columns_str.split(",")]
-        columns = [c for c in columns if c in df.columns]
-    else:
-        columns = df.columns.tolist()
+    if not columns:
+        return "Please select at least one column", None
     
     try:
         for col in columns:
@@ -97,7 +107,7 @@ def handle_missing_values(strategy, columns_str, fill_value):
                 df[col].fillna(method='bfill', inplace=True)
         
         current_df = df
-        return f"✓ Missing values handled using '{strategy}'", df.head(20)
+        return f"✓ Missing values handled using '{strategy}' for {len(columns)} column(s)", df.head(20)
     except Exception as e:
         return f"Error: {str(e)}", None
 
@@ -109,10 +119,8 @@ def remove_duplicates(subset_cols):
     df = current_df.copy()
     initial_count = len(df)
     
-    if subset_cols.strip():
-        cols = [c.strip() for c in subset_cols.split(",")]
-        cols = [c for c in cols if c in df.columns]
-        df = df.drop_duplicates(subset=cols if cols else None)
+    if subset_cols:
+        df = df.drop_duplicates(subset=subset_cols)
     else:
         df = df.drop_duplicates()
     
@@ -120,18 +128,15 @@ def remove_duplicates(subset_cols):
     current_df = df
     return f"✓ Removed {removed} duplicate rows", df.head(20)
 
-def handle_outliers(method, columns_str, threshold):
+def handle_outliers(method, columns, threshold):
     global current_df
     if current_df is None:
         return "No dataset loaded", None
     
     df = current_df.copy()
     
-    if columns_str.strip():
-        columns = [c.strip() for c in columns_str.split(",")]
-        columns = [c for c in columns if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
-    else:
-        columns = df.select_dtypes(include=[np.number]).columns.tolist()
+    if not columns:
+        return "Please select at least one column", None
     
     try:
         removed_count = 0
@@ -148,7 +153,8 @@ def handle_outliers(method, columns_str, threshold):
             elif method == "Z-Score Method":
                 z_scores = np.abs(stats.zscore(df[col].dropna()))
                 initial = len(df)
-                df = df[np.abs(stats.zscore(df[col])) < threshold]
+                mask = np.abs(stats.zscore(df[col])) < threshold
+                df = df[mask]
                 removed_count += initial - len(df)
             elif method == "Cap outliers":
                 Q1 = df[col].quantile(0.25)
@@ -159,7 +165,7 @@ def handle_outliers(method, columns_str, threshold):
                 df[col] = df[col].clip(lower, upper)
         
         current_df = df
-        msg = f"✓ Outliers handled using '{method}'"
+        msg = f"✓ Outliers handled using '{method}' for {len(columns)} column(s)"
         if method != "Cap outliers":
             msg += f" ({removed_count} rows removed)"
         return msg, df.head(20)
@@ -170,6 +176,9 @@ def correct_data_types(column, new_type):
     global current_df
     if current_df is None:
         return "No dataset loaded", None
+    
+    if not column:
+        return "Please select a column", None
     
     df = current_df.copy()
     
@@ -192,18 +201,15 @@ def correct_data_types(column, new_type):
     except Exception as e:
         return f"Error: {str(e)}", None
 
-def standardize_text(columns_str, operation):
+def standardize_text(columns, operation):
     global current_df
     if current_df is None:
         return "No dataset loaded", None
     
-    df = current_df.copy()
+    if not columns:
+        return "Please select at least one column", None
     
-    if columns_str.strip():
-        columns = [c.strip() for c in columns_str.split(",")]
-        columns = [c for c in columns if c in df.columns]
-    else:
-        columns = df.select_dtypes(include=['object']).columns.tolist()
+    df = current_df.copy()
     
     try:
         for col in columns:
@@ -219,22 +225,19 @@ def standardize_text(columns_str, operation):
                 df[col] = df[col].astype(str).str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
         
         current_df = df
-        return f"✓ Text standardized: {operation}", df.head(20)
+        return f"✓ Text standardized: {operation} for {len(columns)} column(s)", df.head(20)
     except Exception as e:
         return f"Error: {str(e)}", None
 
-def scale_normalize(columns_str, method):
+def scale_normalize(columns, method):
     global current_df
     if current_df is None:
         return "No dataset loaded", None
     
-    df = current_df.copy()
+    if not columns:
+        return "Please select at least one column", None
     
-    if columns_str.strip():
-        columns = [c.strip() for c in columns_str.split(",")]
-        columns = [c for c in columns if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
-    else:
-        columns = df.select_dtypes(include=[np.number]).columns.tolist()
+    df = current_df.copy()
     
     try:
         if method == "Standard Scaler (Z-score)":
@@ -248,7 +251,7 @@ def scale_normalize(columns_str, method):
             df[columns] = scaler.fit_transform(df[columns])
         
         current_df = df
-        return f"✓ Scaling applied: {method}", df.head(20)
+        return f"✓ Scaling applied: {method} for {len(columns)} column(s)", df.head(20)
     except Exception as e:
         return f"Error: {str(e)}", None
 
@@ -281,12 +284,6 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
             info_output = gr.Textbox(label="Dataset Info", lines=2)
         
         table_output = gr.Dataframe(label="Data Preview", wrap=True)
-        
-        file_input.change(
-            fn=load_file,
-            inputs=file_input,
-            outputs=[info_output, table_output]
-        )
     
     with gr.Tab("🧹 Data Cleaning"):
         gr.Markdown("### Data Quality Summary")
@@ -309,9 +306,11 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                     label="Strategy",
                     value="Drop rows"
                 )
-                missing_cols = gr.Textbox(
-                    label="Columns (comma-separated, leave empty for all)",
-                    placeholder="e.g., age, salary"
+                missing_cols = gr.Dropdown(
+                    choices=[],
+                    label="Select Columns",
+                    multiselect=True,
+                    interactive=True
                 )
                 fill_val = gr.Textbox(label="Custom Fill Value (if applicable)", value="0")
             
@@ -326,9 +325,11 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
             )
         
         with gr.Accordion("2️⃣ Remove Duplicates", open=False):
-            dup_cols = gr.Textbox(
-                label="Subset Columns (comma-separated, leave empty for all)",
-                placeholder="e.g., id, email"
+            dup_cols = gr.Dropdown(
+                choices=[],
+                label="Select Subset Columns (leave empty for all columns)",
+                multiselect=True,
+                interactive=True
             )
             dup_btn = gr.Button("Remove Duplicates", variant="primary")
             dup_status = gr.Textbox(label="Status")
@@ -347,9 +348,11 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                     label="Method",
                     value="IQR Method"
                 )
-                outlier_cols = gr.Textbox(
-                    label="Columns (comma-separated, leave empty for all numeric)",
-                    placeholder="e.g., price, age"
+                outlier_cols = gr.Dropdown(
+                    choices=[],
+                    label="Select Numeric Columns",
+                    multiselect=True,
+                    interactive=True
                 )
                 z_threshold = gr.Number(label="Z-Score Threshold", value=3)
             
@@ -365,7 +368,11 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
         
         with gr.Accordion("4️⃣ Correct Data Types", open=False):
             with gr.Row():
-                dtype_col = gr.Textbox(label="Column Name", placeholder="e.g., age")
+                dtype_col = gr.Dropdown(
+                    choices=[],
+                    label="Select Column",
+                    interactive=True
+                )
                 dtype_type = gr.Dropdown(
                     choices=["int", "float", "string", "datetime", "category", "bool"],
                     label="New Type",
@@ -384,9 +391,11 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
         
         with gr.Accordion("5️⃣ Standardize Text", open=False):
             with gr.Row():
-                text_cols = gr.Textbox(
-                    label="Columns (comma-separated, leave empty for all text)",
-                    placeholder="e.g., name, city"
+                text_cols = gr.Dropdown(
+                    choices=[],
+                    label="Select Text Columns",
+                    multiselect=True,
+                    interactive=True
                 )
                 text_operation = gr.Dropdown(
                     choices=["Lowercase", "Uppercase", "Title Case", 
@@ -407,9 +416,11 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
         
         with gr.Accordion("6️⃣ Scaling & Normalization", open=False):
             with gr.Row():
-                scale_cols = gr.Textbox(
-                    label="Columns (comma-separated, leave empty for all numeric)",
-                    placeholder="e.g., price, salary"
+                scale_cols = gr.Dropdown(
+                    choices=[],
+                    label="Select Numeric Columns",
+                    multiselect=True,
+                    interactive=True
                 )
                 scale_method = gr.Dropdown(
                     choices=["Standard Scaler (Z-score)", "Min-Max Scaler (0-1)", "Robust Scaler"],
@@ -446,7 +457,14 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
             fn=reset_data,
             outputs=[reset_status, reset_preview]
         )
+    
+    # Update all dropdowns when file is uploaded
+    file_input.change(
+        fn=load_file,
+        inputs=file_input,
+        outputs=[info_output, table_output, missing_cols, dup_cols, 
+                outlier_cols, dtype_col, text_cols, scale_cols, dtype_col]
+    )
 
 if __name__ == "__main__":
     app.launch(server_name="0.0.0.0", server_port=7860)
-
