@@ -2166,8 +2166,7 @@ with gr.Blocks(title="End-to-End ML Pipeline", theme=gr.themes.Soft()) as demo:
                 cluster_data = gr.Dataframe(label="Data with Clusters", height=300)
                 cluster_plot = gr.Plot(label="Cluster Visualization")
                 
-                cluster_btn.click(train_clustering, inputs=[n_clusters, cluster_algo], 
-                                outputs=[cluster_output, cluster_data, cluster_plot])
+                cluster_btn.click(train_clustering, inputs=[n_clusters], outputs=[cluster_output, cluster_data])
             
             with gr.Accordion("6️⃣ Dimensionality Reduction"):
                 gr.Markdown("Reduce feature dimensions while preserving information")
