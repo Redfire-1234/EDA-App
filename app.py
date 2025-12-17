@@ -314,6 +314,7 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
     gr.Markdown("# 📊 EDA & Data Cleaning App")
     gr.Markdown("Upload CSV, Excel, or JSON files for exploration and cleaning")
     
+    
     with gr.Tab("📁 Upload & Overview"):
         with gr.Row():
             file_input = gr.File(
@@ -562,7 +563,7 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
             fn=reset_data,
             outputs=[reset_status, reset_preview]
         )
-with gr.Tab("📊 EDA (Exploratory Data Analysis)"):
+    with gr.Tab("📊 EDA (Exploratory Data Analysis)"):
         gr.Markdown("### Exploratory Data Analysis Tools")
         
         with gr.Accordion("1️⃣ Understanding Data", open=True):
