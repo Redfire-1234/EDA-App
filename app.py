@@ -33,13 +33,19 @@ def load_file(file):
         text_cols = df.select_dtypes(include=['object']).columns.tolist()
         
         return (info, df.head(20), 
-                gr.update(choices=all_cols), 
-                gr.update(choices=all_cols),
-                gr.update(choices=numeric_cols),
-                gr.update(choices=all_cols),
-                gr.update(choices=text_cols),
-                gr.update(choices=numeric_cols),
-                gr.update(choices=all_cols))
+                gr.update(choices=all_cols),  # missing_cols
+                gr.update(choices=all_cols),  # dup_cols
+                gr.update(choices=numeric_cols),  # outlier_cols
+                gr.update(choices=all_cols),  # dtype_col
+                gr.update(choices=text_cols),  # text_cols
+                gr.update(choices=numeric_cols),  # scale_cols
+                gr.update(choices=all_cols),  # dtype_col (duplicate)
+                gr.update(choices=all_cols),  # uni_col
+                gr.update(choices=all_cols),  # bi_col1
+                gr.update(choices=all_cols),  # bi_col2
+                gr.update(choices=numeric_cols),  # outlier_col (EDA)
+                gr.update(choices=numeric_cols),  # dist_col
+                gr.update(choices=text_cols + all_cols))  # cat_col
     except Exception as e:
         return f"Error: {str(e)}", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
 
@@ -556,14 +562,507 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
             fn=reset_data,
             outputs=[reset_status, reset_preview]
         )
+with gr.Tab("📊 EDA (Exploratory Data Analysis)"):
+        gr.Markdown("### Exploratory Data Analysis Tools")
+        
+        with gr.Accordion("1️⃣ Understanding Data", open=True):
+            understand_btn = gr.Button("Show Data Overview", variant="primary")
+            understand_output = gr.Markdown()
+            understand_table = gr.Dataframe(label="Sample Data")
+            
+            def understand_data():
+                global current_df
+                if current_df is None:
+                    return "No dataset loaded", None
+                
+                info = []
+                info.append(f"### Dataset Overview\n")
+                info.append(f"**Shape:** {current_df.shape[0]} rows × {current_df.shape[1]} columns\n")
+                info.append(f"**Memory Usage:** {current_df.memory_usage(deep=True).sum() / 1024**2:.2f} MB\n")
+                info.append(f"\n**Column Information:**\n")
+                
+                for col in current_df.columns:
+                    dtype = current_df[col].dtype
+                    non_null = current_df[col].count()
+                    null_count = current_df[col].isnull().sum()
+                    unique = current_df[col].nunique()
+                    info.append(f"- **{col}**: {dtype} | Non-Null: {non_null} | Null: {null_count} | Unique: {unique}")
+                
+                return "\n".join(info), current_df.head(10)
+            
+            understand_btn.click(
+                fn=understand_data,
+                outputs=[understand_output, understand_table]
+            )
+        
+        with gr.Accordion("2️⃣ Descriptive Statistics", open=False):
+            with gr.Row():
+                desc_type = gr.Radio(
+                    choices=["Numeric Only", "All Columns", "Categorical Only"],
+                    label="Statistics Type",
+                    value="Numeric Only"
+                )
+            desc_btn = gr.Button("Generate Statistics", variant="primary")
+            desc_output = gr.Dataframe(label="Descriptive Statistics")
+            
+            def descriptive_stats(stat_type):
+                global current_df
+                if current_df is None:
+                    return None
+                
+                try:
+                    if stat_type == "Numeric Only":
+                        return current_df.describe()
+                    elif stat_type == "All Columns":
+                        return current_df.describe(include='all')
+                    else:  # Categorical Only
+                        return current_df.describe(include=['object', 'category'])
+                except Exception as e:
+                    return pd.DataFrame({"Error": [str(e)]})
+            
+            desc_btn.click(
+                fn=descriptive_stats,
+                inputs=desc_type,
+                outputs=desc_output
+            )
+        
+        with gr.Accordion("3️⃣ Univariate Analysis", open=False):
+            with gr.Row():
+                uni_col = gr.Dropdown(choices=[], label="Select Column", interactive=True)
+                uni_plot_type = gr.Dropdown(
+                    choices=["Histogram", "Box Plot", "Value Counts", "Statistics"],
+                    label="Analysis Type",
+                    value="Histogram"
+                )
+            uni_btn = gr.Button("Analyze", variant="primary")
+            uni_output = gr.Plot(label="Visualization")
+            uni_stats = gr.Markdown(label="Statistics")
+            
+            def univariate_analysis(column, plot_type):
+                global current_df
+                if current_df is None or not column:
+                    return None, "No data or column selected"
+                
+                import matplotlib.pyplot as plt
+                
+                try:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    
+                    if plot_type == "Histogram":
+                        if pd.api.types.is_numeric_dtype(current_df[column]):
+                            ax.hist(current_df[column].dropna(), bins=30, edgecolor='black', alpha=0.7)
+                            ax.set_xlabel(column)
+                            ax.set_ylabel("Frequency")
+                            ax.set_title(f"Histogram of {column}")
+                            ax.grid(True, alpha=0.3)
+                        else:
+                            return None, "Histogram only works with numeric columns"
+                    
+                    elif plot_type == "Box Plot":
+                        if pd.api.types.is_numeric_dtype(current_df[column]):
+                            ax.boxplot(current_df[column].dropna(), vert=True)
+                            ax.set_ylabel(column)
+                            ax.set_title(f"Box Plot of {column}")
+                            ax.grid(True, alpha=0.3)
+                        else:
+                            return None, "Box plot only works with numeric columns"
+                    
+                    elif plot_type == "Value Counts":
+                        value_counts = current_df[column].value_counts().head(20)
+                        ax.bar(range(len(value_counts)), value_counts.values)
+                        ax.set_xticks(range(len(value_counts)))
+                        ax.set_xticklabels(value_counts.index, rotation=45, ha='right')
+                        ax.set_xlabel(column)
+                        ax.set_ylabel("Count")
+                        ax.set_title(f"Value Counts of {column}")
+                        ax.grid(True, alpha=0.3)
+                    
+                    elif plot_type == "Statistics":
+                        stats_text = f"### Statistics for {column}\n\n"
+                        if pd.api.types.is_numeric_dtype(current_df[column]):
+                            stats_text += f"**Mean:** {current_df[column].mean():.2f}\n\n"
+                            stats_text += f"**Median:** {current_df[column].median():.2f}\n\n"
+                            stats_text += f"**Std Dev:** {current_df[column].std():.2f}\n\n"
+                            stats_text += f"**Min:** {current_df[column].min():.2f}\n\n"
+                            stats_text += f"**Max:** {current_df[column].max():.2f}\n\n"
+                        stats_text += f"**Unique Values:** {current_df[column].nunique()}\n\n"
+                        stats_text += f"**Missing Values:** {current_df[column].isnull().sum()}\n\n"
+                        plt.close(fig)
+                        return None, stats_text
+                    
+                    plt.tight_layout()
+                    return fig, ""
+                except Exception as e:
+                    plt.close(fig)
+                    return None, f"Error: {str(e)}"
+            
+            uni_btn.click(
+                fn=univariate_analysis,
+                inputs=[uni_col, uni_plot_type],
+                outputs=[uni_output, uni_stats]
+            )
+        
+        with gr.Accordion("4️⃣ Bivariate Analysis", open=False):
+            with gr.Row():
+                bi_col1 = gr.Dropdown(choices=[], label="Select Column 1", interactive=True)
+                bi_col2 = gr.Dropdown(choices=[], label="Select Column 2", interactive=True)
+                bi_plot_type = gr.Dropdown(
+                    choices=["Scatter Plot", "Line Plot", "Bar Plot", "Correlation"],
+                    label="Plot Type",
+                    value="Scatter Plot"
+                )
+            bi_btn = gr.Button("Analyze", variant="primary")
+            bi_output = gr.Plot(label="Visualization")
+            bi_stats = gr.Markdown(label="Statistics")
+            
+            def bivariate_analysis(col1, col2, plot_type):
+                global current_df
+                if current_df is None or not col1 or not col2:
+                    return None, "Please select both columns"
+                
+                import matplotlib.pyplot as plt
+                
+                try:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    
+                    if plot_type == "Scatter Plot":
+                        if pd.api.types.is_numeric_dtype(current_df[col1]) and pd.api.types.is_numeric_dtype(current_df[col2]):
+                            ax.scatter(current_df[col1], current_df[col2], alpha=0.5)
+                            ax.set_xlabel(col1)
+                            ax.set_ylabel(col2)
+                            ax.set_title(f"Scatter Plot: {col1} vs {col2}")
+                            ax.grid(True, alpha=0.3)
+                        else:
+                            return None, "Scatter plot requires numeric columns"
+                    
+                    elif plot_type == "Line Plot":
+                        if pd.api.types.is_numeric_dtype(current_df[col2]):
+                            ax.plot(current_df[col1], current_df[col2], marker='o', markersize=3)
+                            ax.set_xlabel(col1)
+                            ax.set_ylabel(col2)
+                            ax.set_title(f"Line Plot: {col1} vs {col2}")
+                            ax.grid(True, alpha=0.3)
+                        else:
+                            return None, "Line plot requires numeric Y-axis"
+                    
+                    elif plot_type == "Bar Plot":
+                        grouped = current_df.groupby(col1)[col2].mean().head(20)
+                        ax.bar(range(len(grouped)), grouped.values)
+                        ax.set_xticks(range(len(grouped)))
+                        ax.set_xticklabels(grouped.index, rotation=45, ha='right')
+                        ax.set_xlabel(col1)
+                        ax.set_ylabel(f"Mean of {col2}")
+                        ax.set_title(f"Bar Plot: {col1} vs {col2}")
+                        ax.grid(True, alpha=0.3)
+                    
+                    elif plot_type == "Correlation":
+                        if pd.api.types.is_numeric_dtype(current_df[col1]) and pd.api.types.is_numeric_dtype(current_df[col2]):
+                            corr = current_df[[col1, col2]].corr().iloc[0, 1]
+                            stats_text = f"### Correlation Analysis\n\n"
+                            stats_text += f"**Pearson Correlation:** {corr:.4f}\n\n"
+                            if abs(corr) > 0.7:
+                                stats_text += "**Interpretation:** Strong correlation\n"
+                            elif abs(corr) > 0.4:
+                                stats_text += "**Interpretation:** Moderate correlation\n"
+                            else:
+                                stats_text += "**Interpretation:** Weak correlation\n"
+                            plt.close(fig)
+                            return None, stats_text
+                        else:
+                            return None, "Correlation requires numeric columns"
+                    
+                    plt.tight_layout()
+                    return fig, ""
+                except Exception as e:
+                    plt.close(fig)
+                    return None, f"Error: {str(e)}"
+            
+            bi_btn.click(
+                fn=bivariate_analysis,
+                inputs=[bi_col1, bi_col2, bi_plot_type],
+                outputs=[bi_output, bi_stats]
+            )
+        
+        with gr.Accordion("5️⃣ Correlation Matrix (Multivariate)", open=False):
+            with gr.Row():
+                corr_method = gr.Dropdown(
+                    choices=["pearson", "spearman", "kendall"],
+                    label="Correlation Method",
+                    value="pearson"
+                )
+            corr_btn = gr.Button("Generate Correlation Matrix", variant="primary")
+            corr_output = gr.Plot(label="Correlation Heatmap")
+            
+            def correlation_matrix(method):
+                global current_df
+                if current_df is None:
+                    return None
+                
+                import matplotlib.pyplot as plt
+                import seaborn as sns
+                
+                try:
+                    numeric_df = current_df.select_dtypes(include=[np.number])
+                    if numeric_df.empty:
+                        return None
+                    
+                    corr = numeric_df.corr(method=method)
+                    
+                    fig, ax = plt.subplots(figsize=(12, 10))
+                    sns.heatmap(corr, annot=True, fmt='.2f', cmap='coolwarm', 
+                               center=0, square=True, ax=ax, cbar_kws={"shrink": 0.8})
+                    ax.set_title(f"Correlation Matrix ({method.capitalize()})")
+                    plt.tight_layout()
+                    return fig
+                except Exception as e:
+                    return None
+            
+            corr_btn.click(
+                fn=correlation_matrix,
+                inputs=corr_method,
+                outputs=corr_output
+            )
+        
+        with gr.Accordion("6️⃣ Missing Value Analysis", open=False):
+            missing_analysis_btn = gr.Button("Analyze Missing Values", variant="primary")
+            missing_plot = gr.Plot(label="Missing Values Visualization")
+            missing_details = gr.Markdown(label="Details")
+            
+            def missing_value_analysis():
+                global current_df
+                if current_df is None:
+                    return None, "No dataset loaded"
+                
+                import matplotlib.pyplot as plt
+                
+                try:
+                    missing = current_df.isnull().sum()
+                    missing = missing[missing > 0].sort_values(ascending=False)
+                    
+                    if len(missing) == 0:
+                        return None, "### No missing values found! ✓"
+                    
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    ax.bar(range(len(missing)), missing.values)
+                    ax.set_xticks(range(len(missing)))
+                    ax.set_xticklabels(missing.index, rotation=45, ha='right')
+                    ax.set_xlabel("Columns")
+                    ax.set_ylabel("Missing Count")
+                    ax.set_title("Missing Values by Column")
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    
+                    details = "### Missing Value Details\n\n"
+                    for col, count in missing.items():
+                        pct = (count / len(current_df)) * 100
+                        details += f"**{col}**: {count} ({pct:.1f}%)\n\n"
+                    
+                    return fig, details
+                except Exception as e:
+                    return None, f"Error: {str(e)}"
+            
+            missing_analysis_btn.click(
+                fn=missing_value_analysis,
+                outputs=[missing_plot, missing_details]
+            )
+        
+        with gr.Accordion("7️⃣ Outlier Detection", open=False):
+            outlier_col = gr.Dropdown(choices=[], label="Select Numeric Column", interactive=True)
+            outlier_method_vis = gr.Dropdown(
+                choices=["Box Plot", "IQR Analysis", "Z-Score Analysis"],
+                label="Detection Method",
+                value="Box Plot"
+            )
+            outlier_btn = gr.Button("Detect Outliers", variant="primary")
+            outlier_plot = gr.Plot(label="Visualization")
+            outlier_stats = gr.Markdown(label="Outlier Statistics")
+            
+            def outlier_detection(column, method):
+                global current_df
+                if current_df is None or not column:
+                    return None, "No data or column selected"
+                
+                import matplotlib.pyplot as plt
+                
+                try:
+                    if not pd.api.types.is_numeric_dtype(current_df[column]):
+                        return None, "Please select a numeric column"
+                    
+                    data = current_df[column].dropna()
+                    
+                    if method == "Box Plot":
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        ax.boxplot(data, vert=True)
+                        ax.set_ylabel(column)
+                        ax.set_title(f"Box Plot - Outlier Detection for {column}")
+                        ax.grid(True, alpha=0.3)
+                        plt.tight_layout()
+                        return fig, ""
+                    
+                    elif method == "IQR Analysis":
+                        Q1 = data.quantile(0.25)
+                        Q3 = data.quantile(0.75)
+                        IQR = Q3 - Q1
+                        lower = Q1 - 1.5 * IQR
+                        upper = Q3 + 1.5 * IQR
+                        outliers = data[(data < lower) | (data > upper)]
+                        
+                        stats_text = f"### IQR Outlier Analysis for {column}\n\n"
+                        stats_text += f"**Q1 (25%):** {Q1:.2f}\n\n"
+                        stats_text += f"**Q3 (75%):** {Q3:.2f}\n\n"
+                        stats_text += f"**IQR:** {IQR:.2f}\n\n"
+                        stats_text += f"**Lower Bound:** {lower:.2f}\n\n"
+                        stats_text += f"**Upper Bound:** {upper:.2f}\n\n"
+                        stats_text += f"**Number of Outliers:** {len(outliers)} ({len(outliers)/len(data)*100:.1f}%)\n\n"
+                        
+                        return None, stats_text
+                    
+                    elif method == "Z-Score Analysis":
+                        z_scores = np.abs(stats.zscore(data))
+                        outliers = data[z_scores > 3]
+                        
+                        stats_text = f"### Z-Score Outlier Analysis for {column}\n\n"
+                        stats_text += f"**Mean:** {data.mean():.2f}\n\n"
+                        stats_text += f"**Std Dev:** {data.std():.2f}\n\n"
+                        stats_text += f"**Outliers (|Z| > 3):** {len(outliers)} ({len(outliers)/len(data)*100:.1f}%)\n\n"
+                        
+                        return None, stats_text
+                    
+                except Exception as e:
+                    return None, f"Error: {str(e)}"
+            
+            outlier_btn.click(
+                fn=outlier_detection,
+                inputs=[outlier_col, outlier_method_vis],
+                outputs=[outlier_plot, outlier_stats]
+            )
+        
+        with gr.Accordion("8️⃣ Distribution Analysis", open=False):
+            dist_col = gr.Dropdown(choices=[], label="Select Numeric Column", interactive=True)
+            dist_btn = gr.Button("Analyze Distribution", variant="primary")
+            dist_plot = gr.Plot(label="Distribution Plot")
+            dist_stats = gr.Markdown(label="Distribution Statistics")
+            
+            def distribution_analysis(column):
+                global current_df
+                if current_df is None or not column:
+                    return None, "No data or column selected"
+                
+                import matplotlib.pyplot as plt
+                from scipy import stats as sp_stats
+                
+                try:
+                    if not pd.api.types.is_numeric_dtype(current_df[column]):
+                        return None, "Please select a numeric column"
+                    
+                    data = current_df[column].dropna()
+                    
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+                    
+                    # Histogram with KDE
+                    ax1.hist(data, bins=30, density=True, alpha=0.7, edgecolor='black')
+                    data.plot(kind='kde', ax=ax1, color='red', linewidth=2)
+                    ax1.set_xlabel(column)
+                    ax1.set_ylabel("Density")
+                    ax1.set_title(f"Distribution of {column}")
+                    ax1.grid(True, alpha=0.3)
+                    
+                    # Q-Q Plot
+                    sp_stats.probplot(data, dist="norm", plot=ax2)
+                    ax2.set_title("Q-Q Plot (Normal Distribution)")
+                    ax2.grid(True, alpha=0.3)
+                    
+                    plt.tight_layout()
+                    
+                    # Statistics
+                    skewness = sp_stats.skew(data)
+                    kurtosis = sp_stats.kurtosis(data)
+                    
+                    stats_text = f"### Distribution Statistics for {column}\n\n"
+                    stats_text += f"**Mean:** {data.mean():.2f}\n\n"
+                    stats_text += f"**Median:** {data.median():.2f}\n\n"
+                    stats_text += f"**Std Dev:** {data.std():.2f}\n\n"
+                    stats_text += f"**Skewness:** {skewness:.2f} "
+                    if abs(skewness) < 0.5:
+                        stats_text += "(Fairly symmetric)\n\n"
+                    elif skewness > 0:
+                        stats_text += "(Right-skewed)\n\n"
+                    else:
+                        stats_text += "(Left-skewed)\n\n"
+                    stats_text += f"**Kurtosis:** {kurtosis:.2f}\n\n"
+                    
+                    return fig, stats_text
+                except Exception as e:
+                    return None, f"Error: {str(e)}"
+            
+            dist_btn.click(
+                fn=distribution_analysis,
+                inputs=dist_col,
+                outputs=[dist_plot, dist_stats]
+            )
+        
+        with gr.Accordion("9️⃣ Categorical Data Analysis", open=False):
+            cat_col = gr.Dropdown(choices=[], label="Select Categorical Column", interactive=True)
+            cat_btn = gr.Button("Analyze", variant="primary")
+            cat_plot = gr.Plot(label="Visualization")
+            cat_stats = gr.Markdown(label="Statistics")
+            
+            def categorical_analysis(column):
+                global current_df
+                if current_df is None or not column:
+                    return None, "No data or column selected"
+                
+                import matplotlib.pyplot as plt
+                
+                try:
+                    value_counts = current_df[column].value_counts().head(15)
+                    
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+                    
+                    # Bar plot
+                    ax1.bar(range(len(value_counts)), value_counts.values)
+                    ax1.set_xticks(range(len(value_counts)))
+                    ax1.set_xticklabels(value_counts.index, rotation=45, ha='right')
+                    ax1.set_xlabel(column)
+                    ax1.set_ylabel("Count")
+                    ax1.set_title(f"Top Categories - {column}")
+                    ax1.grid(True, alpha=0.3)
+                    
+                    # Pie chart
+                    ax2.pie(value_counts.values, labels=value_counts.index, autopct='%1.1f%%', startangle=90)
+                    ax2.set_title(f"Distribution - {column}")
+                    
+                    plt.tight_layout()
+                    
+                    # Statistics
+                    stats_text = f"### Categorical Analysis for {column}\n\n"
+                    stats_text += f"**Unique Values:** {current_df[column].nunique()}\n\n"
+                    stats_text += f"**Most Common:** {value_counts.index[0]} ({value_counts.values[0]} occurrences)\n\n"
+                    stats_text += f"**Mode Frequency:** {value_counts.values[0]/len(current_df)*100:.1f}%\n\n"
+                    
+                    return fig, stats_text
+                except Exception as e:
+                    return None, f"Error: {str(e)}"
+            
+            cat_btn.click(
+                fn=categorical_analysis,
+                inputs=cat_col,
+                outputs=[cat_plot, cat_stats]
+            )
+        
+        # Store dropdown references for EDA tab
+        eda_dropdowns = [uni_col, bi_col1, bi_col2, outlier_col, dist_col, cat_col]
+    
     
     # Update all dropdowns when file is uploaded
     file_input.change(
         fn=load_file,
         inputs=file_input,
         outputs=[info_output, table_output, missing_cols, dup_cols, 
-                outlier_cols, dtype_col, text_cols, scale_cols, dtype_col]
+                outlier_cols, dtype_col, text_cols, scale_cols, dtype_col,
+                uni_col, bi_col1, bi_col2, outlier_col, dist_col, cat_col]
     )
+    
 
 if __name__ == "__main__":
     app.launch(server_name="0.0.0.0", server_port=7860)
