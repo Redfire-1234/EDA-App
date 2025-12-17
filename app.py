@@ -2214,4 +2214,4 @@ with gr.Blocks(title="End-to-End ML Pipeline", theme=gr.themes.Soft()) as demo:
     gr.Markdown("💡 **Tip:** Process your data step-by-step from left to right through the tabs")
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=True))
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
