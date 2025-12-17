@@ -1271,9 +1271,9 @@ def hyperparameter_tuning(model_type, task_type, search_type, n_iter):
         return f"❌ Error: {e}"
 
 # 4. UNSUPERVISED LEARNING
-def train_clustering(n_clusters, algorithm):
+def train_clustering(n_clusters):
     if state["df"] is None:
-        return "⚠️ Please upload data first", None, None
+        return "⚠️ Please upload data first", None
     
     df = state["df"].copy()
     numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
@@ -1282,56 +1282,20 @@ def train_clustering(n_clusters, algorithm):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
-    try:
-        if algorithm == "KMeans":
-            model = KMeans(n_clusters=n_clusters, random_state=42)
-        elif algorithm == "DBSCAN":
-            from sklearn.cluster import DBSCAN
-            model = DBSCAN(eps=0.5, min_samples=5)
-        elif algorithm == "Agglomerative":
-            from sklearn.cluster import AgglomerativeClustering
-            model = AgglomerativeClustering(n_clusters=n_clusters)
-        
-        clusters = model.fit_predict(X_scaled)
-        
-        df["Cluster"] = clusters
-        state["df"] = df
-        state["model"] = model
-        
-        # Calculate metrics
-        from sklearn.metrics import silhouette_score, davies_bouldin_score
-        silhouette = silhouette_score(X_scaled, clusters)
-        davies_bouldin = davies_bouldin_score(X_scaled, clusters)
-        
-        # Cluster distribution
-        cluster_counts = pd.Series(clusters).value_counts().sort_index()
-        
-        result = f"""✅ {algorithm} clustering completed!
-
-**Clusters:** {n_clusters if algorithm != "DBSCAN" else len(set(clusters)) - (1 if -1 in clusters else 0)}
-**Silhouette Score:** {silhouette:.4f} (Higher is better, range: -1 to 1)
-**Davies-Bouldin Index:** {davies_bouldin:.4f} (Lower is better)
-
-**Cluster Distribution:**
-"""
-        for i, count in cluster_counts.items():
-            result += f"\nCluster {i}: {count} samples ({count/len(clusters)*100:.1f}%)"
-        
-        # Create visualization
-        if X.shape[1] >= 2:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            scatter = ax.scatter(X_scaled[:, 0], X_scaled[:, 1], c=clusters, cmap='viridis', alpha=0.6)
-            ax.set_title(f'{algorithm} Clustering Results')
-            ax.set_xlabel('Feature 1 (scaled)')
-            ax.set_ylabel('Feature 2 (scaled)')
-            plt.colorbar(scatter, ax=ax, label='Cluster')
-            plt.tight_layout()
-        else:
-            fig = None
-        
-        return result, df.head(20), fig
-    except Exception as e:
-        return f"❌ Error: {e}", None, None
+    model = KMeans(n_clusters=n_clusters, random_state=42)
+    clusters = model.fit_predict(X_scaled)
+    
+    df["Cluster"] = clusters
+    state["df"] = df
+    state["model"] = model
+    
+    cluster_counts = pd.Series(clusters).value_counts().sort_index()
+    
+    result = f"✅ KMeans clustering completed with {n_clusters} clusters\n\n**Cluster Distribution:**\n"
+    for i, count in cluster_counts.items():
+        result += f"Cluster {i}: {count} samples ({count/len(clusters)*100:.1f}%)\n"
+    
+    return result, df.head(20)
 
 def apply_dimensionality_reduction(method, n_components):
     if state["df"] is None:
@@ -2250,4 +2214,4 @@ with gr.Blocks(title="End-to-End ML Pipeline", theme=gr.themes.Soft()) as demo:
     gr.Markdown("💡 **Tip:** Process your data step-by-step from left to right through the tabs")
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=True))
