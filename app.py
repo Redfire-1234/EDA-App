@@ -13,7 +13,7 @@ df_history = []
 def load_file(file):
     global current_df, df_history
     if file is None:
-        return "No file uploaded", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
+        return "No file uploaded", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
     filename = file.name.lower()
     try:
         if filename.endswith(".csv"):
@@ -35,18 +35,18 @@ def load_file(file):
         text_cols = df.select_dtypes(include=['object']).columns.tolist()
         
         return (info, df.head(20), 
-                gr.update(choices=all_cols),  # missing_cols
-                gr.update(choices=all_cols),  # dup_cols
-                gr.update(choices=numeric_cols),  # outlier_cols
-                gr.update(choices=all_cols),  # dtype_col
-                gr.update(choices=text_cols),  # text_cols
-                gr.update(choices=numeric_cols),  # scale_cols
-                gr.update(choices=all_cols),  # uni_col
-                gr.update(choices=all_cols),  # bi_col1
-                gr.update(choices=all_cols),  # bi_col2
-                gr.update(choices=numeric_cols),  # outlier_col (EDA)
-                gr.update(choices=numeric_cols),  # dist_col
-                gr.update(choices=all_cols))  # cat_col
+          gr.update(choices=all_cols),  # missing_cols
+          gr.update(choices=all_cols),  # dup_cols
+          gr.update(choices=numeric_cols),  # outlier_cols
+          gr.update(choices=all_cols),  # dtype_col
+          gr.update(choices=text_cols),  # text_cols
+          gr.update(choices=numeric_cols),  # scale_cols
+          gr.update(choices=all_cols),  # uni_col
+          gr.update(choices=all_cols),  # bi_col1
+          gr.update(choices=all_cols),  # bi_col2
+          gr.update(choices=numeric_cols),  # outlier_col_eda
+          gr.update(choices=numeric_cols),  # dist_col
+          gr.update(choices=all_cols))  # cat_col
     except Exception as e:
         return f"Error: {str(e)}", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
 
@@ -1044,6 +1044,7 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                 outputs=[cat_plot, cat_stats]
             )
     
+    
     # Update all dropdowns when file is uploaded
     file_input.change(
         fn=load_file,
@@ -1052,6 +1053,7 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                 outlier_cols, dtype_col, text_cols, scale_cols,
                 uni_col, bi_col1, bi_col2, outlier_col_eda, dist_col, cat_col]
     )
+    
 
 if __name__ == "__main__":
     app.launch(server_name="0.0.0.0", server_port=7860)
