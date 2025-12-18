@@ -50,6 +50,20 @@ def load_file(file):
     except Exception as e:
         return f"Error: {str(e)}", None, gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[]), gr.update(choices=[])
 
+def load_file_extended(file):
+    result = load_file(file)
+    # Add extra dropdown updates for Feature Engineering tab
+    if result[0] != "No file uploaded" and "Error" not in result[0]:
+        all_cols = current_df.columns.tolist()
+        numeric_cols = current_df.select_dtypes(include=[np.number]).columns.tolist()
+        return result + (gr.update(choices=all_cols), gr.update(choices=all_cols), 
+                        gr.update(choices=numeric_cols), gr.update(choices=all_cols),
+                        gr.update(choices=numeric_cols), gr.update(choices=numeric_cols))
+    else:
+        return result + (gr.update(choices=[]), gr.update(choices=[]), 
+                        gr.update(choices=[]), gr.update(choices=[]),
+                        gr.update(choices=[]), gr.update(choices=[]))
+        
 def save_to_history():
     global current_df, df_history
     if current_df is not None:
@@ -1043,15 +1057,467 @@ with gr.Blocks(title="EDA App with Data Cleaning", theme=gr.themes.Soft()) as ap
                 inputs=cat_col,
                 outputs=[cat_plot, cat_stats]
             )
-    
-    
+
+    with gr.Tab("⚙️ Feature Engineering"):
+        gr.Markdown("### Feature Engineering Tools")
+        
+        with gr.Accordion("1️⃣ Feature Creation", open=False):
+            gr.Markdown("#### Combine or Transform Features")
+            
+            with gr.Row():
+                fc_operation = gr.Dropdown(
+                    choices=["Combine (Add)", "Combine (Multiply)", "Combine (Divide)", 
+                            "Mathematical Transform", "DateTime Features"],
+                    label="Operation Type",
+                    value="Combine (Add)"
+                )
+            
+            with gr.Row():
+                fc_col1 = gr.Dropdown(choices=[], label="Select Column 1", interactive=True)
+                fc_col2 = gr.Dropdown(choices=[], label="Select Column 2 (if combining)", interactive=True)
+                fc_new_name = gr.Textbox(label="New Feature Name", placeholder="new_feature")
+            
+            with gr.Row():
+                fc_math_op = gr.Dropdown(
+                    choices=["Square", "Cube", "Square Root", "Absolute"],
+                    label="Math Operation (if selected)",
+                    value="Square"
+                )
+            
+            with gr.Row():
+                fc_btn = gr.Button("Create Feature", variant="primary")
+                fc_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
+            fc_status = gr.Textbox(label="Status")
+            fc_preview = gr.Dataframe(label="Preview")
+            
+            def create_feature(operation, col1, col2, new_name, math_op):
+                global current_df
+                if current_df is None:
+                    return "No dataset loaded", None
+                
+                if not col1 or not new_name:
+                    return "Please select column and provide feature name", None
+                
+                save_to_history()
+                df = current_df.copy()
+                
+                try:
+                    if operation == "Combine (Add)":
+                        if not col2:
+                            return "Please select Column 2 for combination", None
+                        df[new_name] = df[col1] + df[col2]
+                    elif operation == "Combine (Multiply)":
+                        if not col2:
+                            return "Please select Column 2 for combination", None
+                        df[new_name] = df[col1] * df[col2]
+                    elif operation == "Combine (Divide)":
+                        if not col2:
+                            return "Please select Column 2 for combination", None
+                        df[new_name] = df[col1] / df[col2].replace(0, np.nan)
+                    elif operation == "Mathematical Transform":
+                        if math_op == "Square":
+                            df[new_name] = df[col1] ** 2
+                        elif math_op == "Cube":
+                            df[new_name] = df[col1] ** 3
+                        elif math_op == "Square Root":
+                            df[new_name] = np.sqrt(df[col1].abs())
+                        elif math_op == "Absolute":
+                            df[new_name] = df[col1].abs()
+                    elif operation == "DateTime Features":
+                        df[col1] = pd.to_datetime(df[col1], errors='coerce')
+                        df[f"{col1}_year"] = df[col1].dt.year
+                        df[f"{col1}_month"] = df[col1].dt.month
+                        df[f"{col1}_day"] = df[col1].dt.day
+                        df[f"{col1}_dayofweek"] = df[col1].dt.dayofweek
+                        current_df = df
+                        return "✓ DateTime features created (year, month, day, dayofweek)", df.head(20)
+                    
+                    current_df = df
+                    return f"✓ Feature '{new_name}' created successfully", df.head(20)
+                except Exception as e:
+                    df_history.pop()
+                    return f"Error: {str(e)}", None
+            
+            fc_btn.click(
+                fn=create_feature,
+                inputs=[fc_operation, fc_col1, fc_col2, fc_new_name, fc_math_op],
+                outputs=[fc_status, fc_preview]
+            )
+            
+            fc_undo_btn.click(
+                fn=undo_last_action,
+                outputs=[fc_status, fc_preview]
+            )
+        
+        with gr.Accordion("2️⃣ Feature Transformation", open=False):
+            with gr.Row():
+                ft_cols = gr.Dropdown(choices=[], label="Select Columns", multiselect=True, interactive=True)
+                ft_method = gr.Dropdown(
+                    choices=["Log Transform", "Square Transform", "Power Transform (Yeo-Johnson)"],
+                    label="Transformation Method",
+                    value="Log Transform"
+                )
+            
+            with gr.Row():
+                ft_btn = gr.Button("Transform", variant="primary")
+                ft_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
+            ft_status = gr.Textbox(label="Status")
+            ft_preview = gr.Dataframe(label="Preview")
+            
+            def transform_features(columns, method):
+                global current_df
+                if current_df is None:
+                    return "No dataset loaded", None
+                
+                if not columns:
+                    return "Please select at least one column", None
+                
+                save_to_history()
+                df = current_df.copy()
+                
+                try:
+                    from sklearn.preprocessing import PowerTransformer
+                    
+                    for col in columns:
+                        if not pd.api.types.is_numeric_dtype(df[col]):
+                            continue
+                        
+                        if method == "Log Transform":
+                            df[col] = np.log1p(df[col].clip(lower=0))
+                        elif method == "Square Transform":
+                            df[col] = df[col] ** 2
+                        elif method == "Power Transform (Yeo-Johnson)":
+                            pt = PowerTransformer(method='yeo-johnson')
+                            df[col] = pt.fit_transform(df[[col]])
+                    
+                    current_df = df
+                    return f"✓ Transformation applied: {method}", df.head(20)
+                except Exception as e:
+                    df_history.pop()
+                    return f"Error: {str(e)}", None
+            
+            ft_btn.click(
+                fn=transform_features,
+                inputs=[ft_cols, ft_method],
+                outputs=[ft_status, ft_preview]
+            )
+            
+            ft_undo_btn.click(
+                fn=undo_last_action,
+                outputs=[ft_status, ft_preview]
+            )
+        
+        with gr.Accordion("3️⃣ Encoding Categorical Variables", open=False):
+            with gr.Row():
+                enc_cols = gr.Dropdown(choices=[], label="Select Columns", multiselect=True, interactive=True)
+                enc_method = gr.Dropdown(
+                    choices=["Label Encoding", "One-Hot Encoding", "Ordinal Encoding"],
+                    label="Encoding Method",
+                    value="Label Encoding"
+                )
+            
+            with gr.Row():
+                enc_btn = gr.Button("Encode", variant="primary")
+                enc_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
+            enc_status = gr.Textbox(label="Status")
+            enc_preview = gr.Dataframe(label="Preview")
+            
+            def encode_features(columns, method):
+                global current_df
+                if current_df is None:
+                    return "No dataset loaded", None
+                
+                if not columns:
+                    return "Please select at least one column", None
+                
+                save_to_history()
+                df = current_df.copy()
+                
+                try:
+                    from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
+                    
+                    if method == "Label Encoding":
+                        for col in columns:
+                            le = LabelEncoder()
+                            df[col] = le.fit_transform(df[col].astype(str))
+                    
+                    elif method == "One-Hot Encoding":
+                        df = pd.get_dummies(df, columns=columns, prefix=columns, drop_first=False)
+                    
+                    elif method == "Ordinal Encoding":
+                        oe = OrdinalEncoder()
+                        df[columns] = oe.fit_transform(df[columns].astype(str))
+                    
+                    current_df = df
+                    return f"✓ Encoding applied: {method}", df.head(20)
+                except Exception as e:
+                    df_history.pop()
+                    return f"Error: {str(e)}", None
+            
+            enc_btn.click(
+                fn=encode_features,
+                inputs=[enc_cols, enc_method],
+                outputs=[enc_status, enc_preview]
+            )
+            
+            enc_undo_btn.click(
+                fn=undo_last_action,
+                outputs=[enc_status, enc_preview]
+            )
+        
+        with gr.Accordion("4️⃣ Binning / Discretization", open=False):
+            with gr.Row():
+                bin_col = gr.Dropdown(choices=[], label="Select Column", interactive=True)
+                bin_method = gr.Dropdown(
+                    choices=["Equal Width", "Equal Frequency"],
+                    label="Binning Method",
+                    value="Equal Width"
+                )
+                bin_count = gr.Number(label="Number of Bins", value=5)
+            
+            with gr.Row():
+                bin_btn = gr.Button("Apply Binning", variant="primary")
+                bin_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
+            bin_status = gr.Textbox(label="Status")
+            bin_preview = gr.Dataframe(label="Preview")
+            
+            def apply_binning(column, method, n_bins):
+                global current_df
+                if current_df is None:
+                    return "No dataset loaded", None
+                
+                if not column:
+                    return "Please select a column", None
+                
+                save_to_history()
+                df = current_df.copy()
+                
+                try:
+                    if not pd.api.types.is_numeric_dtype(df[column]):
+                        return "Binning requires numeric columns", None
+                    
+                    n_bins = int(n_bins)
+                    
+                    if method == "Equal Width":
+                        df[f"{column}_binned"] = pd.cut(df[column], bins=n_bins, labels=False)
+                    elif method == "Equal Frequency":
+                        df[f"{column}_binned"] = pd.qcut(df[column], q=n_bins, labels=False, duplicates='drop')
+                    
+                    current_df = df
+                    return f"✓ Binning applied: {method} with {n_bins} bins", df.head(20)
+                except Exception as e:
+                    df_history.pop()
+                    return f"Error: {str(e)}", None
+            
+            bin_btn.click(
+                fn=apply_binning,
+                inputs=[bin_col, bin_method, bin_count],
+                outputs=[bin_status, bin_preview]
+            )
+            
+            bin_undo_btn.click(
+                fn=undo_last_action,
+                outputs=[bin_status, bin_preview]
+            )
+        
+        with gr.Accordion("5️⃣ Feature Selection", open=False):
+            with gr.Row():
+                fs_method = gr.Dropdown(
+                    choices=["Correlation Threshold", "Variance Threshold"],
+                    label="Selection Method",
+                    value="Correlation Threshold"
+                )
+                fs_threshold = gr.Number(label="Threshold", value=0.9)
+            
+            fs_btn = gr.Button("Select Features", variant="primary")
+            fs_status = gr.Textbox(label="Status")
+            fs_info = gr.Markdown(label="Selected Features Info")
+            
+            def select_features(method, threshold):
+                global current_df
+                if current_df is None:
+                    return "No dataset loaded", "No info"
+                
+                try:
+                    df = current_df.copy()
+                    numeric_df = df.select_dtypes(include=[np.number])
+                    
+                    if method == "Correlation Threshold":
+                        corr_matrix = numeric_df.corr().abs()
+                        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+                        to_drop = [column for column in upper.columns if any(upper[column] > threshold)]
+                        
+                        info = f"### Correlation-based Feature Selection\n\n"
+                        info += f"**Threshold:** {threshold}\n\n"
+                        info += f"**Features to drop (high correlation):** {len(to_drop)}\n\n"
+                        if to_drop:
+                            info += f"**Dropped features:** {', '.join(to_drop)}\n\n"
+                        else:
+                            info += "**No features exceeded the threshold**\n\n"
+                        
+                        return f"Found {len(to_drop)} features with correlation > {threshold}", info
+                    
+                    elif method == "Variance Threshold":
+                        from sklearn.feature_selection import VarianceThreshold
+                        selector = VarianceThreshold(threshold=threshold)
+                        selector.fit(numeric_df)
+                        
+                        selected = numeric_df.columns[selector.get_support()].tolist()
+                        removed = numeric_df.columns[~selector.get_support()].tolist()
+                        
+                        info = f"### Variance-based Feature Selection\n\n"
+                        info += f"**Threshold:** {threshold}\n\n"
+                        info += f"**Features kept:** {len(selected)}\n\n"
+                        info += f"**Features removed:** {len(removed)}\n\n"
+                        if removed:
+                            info += f"**Removed features:** {', '.join(removed)}\n\n"
+                        
+                        return f"Selected {len(selected)} features with variance > {threshold}", info
+                    
+                except Exception as e:
+                    return f"Error: {str(e)}", "Error occurred"
+            
+            fs_btn.click(
+                fn=select_features,
+                inputs=[fs_method, fs_threshold],
+                outputs=[fs_status, fs_info]
+            )
+        
+        with gr.Accordion("6️⃣ Dimensionality Reduction", open=False):
+            with gr.Row():
+                dr_method = gr.Dropdown(
+                    choices=["PCA (Principal Component Analysis)"],
+                    label="Method",
+                    value="PCA (Principal Component Analysis)"
+                )
+                dr_components = gr.Number(label="Number of Components", value=2)
+            
+            with gr.Row():
+                dr_btn = gr.Button("Apply Reduction", variant="primary")
+                dr_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
+            dr_status = gr.Textbox(label="Status")
+            dr_preview = gr.Dataframe(label="Preview")
+            dr_plot = gr.Plot(label="Explained Variance")
+            
+            def reduce_dimensions(method, n_components):
+                global current_df
+                if current_df is None:
+                    return "No dataset loaded", None, None
+                
+                save_to_history()
+                df = current_df.copy()
+                
+                try:
+                    from sklearn.decomposition import PCA
+                    import matplotlib.pyplot as plt
+                    
+                    numeric_df = df.select_dtypes(include=[np.number])
+                    n_components = int(n_components)
+                    
+                    if method == "PCA (Principal Component Analysis)":
+                        pca = PCA(n_components=n_components)
+                        components = pca.fit_transform(numeric_df.fillna(0))
+                        
+                        # Add PCA components to dataframe
+                        for i in range(n_components):
+                            df[f'PC{i+1}'] = components[:, i]
+                        
+                        # Plot explained variance
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        ax.bar(range(1, n_components + 1), pca.explained_variance_ratio_)
+                        ax.set_xlabel('Principal Component')
+                        ax.set_ylabel('Explained Variance Ratio')
+                        ax.set_title('PCA Explained Variance')
+                        ax.grid(True, alpha=0.3)
+                        plt.tight_layout()
+                        
+                        current_df = df
+                        total_var = pca.explained_variance_ratio_.sum()
+                        return f"✓ PCA applied: {n_components} components (explains {total_var:.2%} variance)", df.head(20), fig
+                    
+                except Exception as e:
+                    df_history.pop()
+                    return f"Error: {str(e)}", None, None
+            
+            dr_btn.click(
+                fn=reduce_dimensions,
+                inputs=[dr_method, dr_components],
+                outputs=[dr_status, dr_preview, dr_plot]
+            )
+            
+            dr_undo_btn.click(
+                fn=undo_last_action,
+                outputs=[dr_status, dr_preview]
+            )
+        
+        with gr.Accordion("7️⃣ Polynomial Features (Interaction)", open=False):
+            with gr.Row():
+                poly_cols = gr.Dropdown(choices=[], label="Select Columns", multiselect=True, interactive=True)
+                poly_degree = gr.Number(label="Polynomial Degree", value=2)
+            
+            with gr.Row():
+                poly_btn = gr.Button("Create Polynomial Features", variant="primary")
+                poly_undo_btn = gr.Button("↩️ Undo", variant="secondary")
+            
+            poly_status = gr.Textbox(label="Status")
+            poly_preview = gr.Dataframe(label="Preview")
+            
+            def create_polynomial(columns, degree):
+                global current_df
+                if current_df is None:
+                    return "No dataset loaded", None
+                
+                if not columns:
+                    return "Please select at least one column", None
+                
+                save_to_history()
+                df = current_df.copy()
+                
+                try:
+                    from sklearn.preprocessing import PolynomialFeatures
+                    
+                    degree = int(degree)
+                    poly = PolynomialFeatures(degree=degree, include_bias=False)
+                    poly_features = poly.fit_transform(df[columns])
+                    
+                    # Get feature names
+                    feature_names = poly.get_feature_names_out(columns)
+                    
+                    # Add polynomial features
+                    for i, name in enumerate(feature_names):
+                        if name not in columns:  # Skip original features
+                            df[name] = poly_features[:, i]
+                    
+                    current_df = df
+                    new_features = len(feature_names) - len(columns)
+                    return f"✓ Created {new_features} polynomial features (degree {degree})", df.head(20)
+                except Exception as e:
+                    df_history.pop()
+                    return f"Error: {str(e)}", None
+            
+            poly_btn.click(
+                fn=create_polynomial,
+                inputs=[poly_cols, poly_degree],
+                outputs=[poly_status, poly_preview]
+            )
+            
+            poly_undo_btn.click(
+                fn=undo_last_action,
+                outputs=[poly_status, poly_preview]
+            )
     # Update all dropdowns when file is uploaded
     file_input.change(
-        fn=load_file,
+        fn=load_file_extended,
         inputs=file_input,
         outputs=[info_output, table_output, missing_cols, dup_cols, 
                 outlier_cols, dtype_col, text_cols, scale_cols,
-                uni_col, bi_col1, bi_col2, outlier_col_eda, dist_col, cat_col]
+                uni_col, bi_col1, bi_col2, outlier_col_eda, dist_col, cat_col,
+                fc_col1, fc_col2, ft_cols, enc_cols, bin_col, poly_cols]
     )
     
 
